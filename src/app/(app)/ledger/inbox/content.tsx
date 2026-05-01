@@ -9,6 +9,7 @@ import {
   useGraphContext,
 } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import { formatAmount, formatDate } from '@/lib/ledger/formatters'
 import type { LedgerAgent, LedgerEventBlock } from '@robosystems/client/clients'
 import {
   Alert,
@@ -73,22 +74,7 @@ const STATUS_BADGE_COLOR: Record<string, string> = {
   pending: 'warning',
 }
 
-const formatDate = (iso: string): string => {
-  const date = new Date(iso)
-  return date.toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-const formatAmount = (cents: number | null, currency: string): string => {
-  if (cents === null || cents === undefined) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency || 'USD',
-  }).format(cents / 100)
-}
+const EVENTS_LIMIT = 200
 
 const InboxContent: FC = function () {
   const { state: graphState } = useGraphContext()
@@ -98,6 +84,7 @@ const InboxContent: FC = function () {
   const [agents, setAgents] = useState<LedgerAgent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [truncated, setTruncated] = useState(false)
 
   // Filters (agentId can be deep-linked from agent detail modal: /ledger/inbox?agentId=...)
   // When deep-linked, default status to "All" so the inbox view matches what the
@@ -127,43 +114,56 @@ const InboxContent: FC = function () {
     return map
   }, [agents])
 
-  const loadEvents = useCallback(async () => {
+  // Initial + filter-driven load. Inlined into the effect (rather than a
+  // useCallback referenced from a separate effect) so the cleanup `cancelled`
+  // flag is local to each invocation — prevents a stale response from
+  // overwriting state if `currentGraph` or any filter changes mid-flight.
+  useEffect(() => {
     if (!currentGraph) {
       setEvents([])
       setIsLoading(false)
+      setTruncated(false)
       return
     }
 
-    try {
-      setIsLoading(true)
-      setError(null)
+    let cancelled = false
+    void (async () => {
+      try {
+        setIsLoading(true)
+        setError(null)
 
-      const list = await clients.ledger.listEventBlocks(currentGraph.graphId, {
-        eventType: eventType || undefined,
-        status: status || undefined,
-        source: source || undefined,
-        agentId: agentId || undefined,
-        limit: 200,
-      })
+        const list = await clients.ledger.listEventBlocks(
+          currentGraph.graphId,
+          {
+            eventType: eventType || undefined,
+            status: status || undefined,
+            source: source || undefined,
+            agentId: agentId || undefined,
+            limit: EVENTS_LIMIT,
+          }
+        )
+        if (cancelled) return
 
-      // Sort by occurred_at descending.
-      list.sort(
-        (a, b) =>
-          new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
-      )
-      setEvents(list)
-    } catch (err) {
-      console.error('Error loading event blocks:', err)
-      setError('Failed to load events. Try again or check the connection.')
-    } finally {
-      setIsLoading(false)
+        // Sort by occurred_at descending.
+        list.sort(
+          (a, b) =>
+            new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+        )
+        setEvents(list)
+        setTruncated(list.length >= EVENTS_LIMIT)
+      } catch (err) {
+        if (cancelled) return
+        console.error('Error loading event blocks:', err)
+        setError('Failed to load events. Try again or check the connection.')
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [currentGraph, eventType, status, source, agentId])
-
-  // Initial + filter-driven load
-  useEffect(() => {
-    void loadEvents()
-  }, [loadEvents])
 
   // Load agents once per graph for the filter Select + name lookup.
   useEffect(() => {
@@ -200,16 +200,34 @@ const InboxContent: FC = function () {
     })
   }, [events, searchTerm, agentById])
 
-  const onApproved = useCallback((eventId: string) => {
-    // Optimistic remove from default-captured list.
-    setEvents((prev) => prev.filter((e) => e.id !== eventId))
-    setSelectedId(null)
-  }, [])
+  // After a transition, either drop the row (if the active status filter
+  // would exclude the new state) or update it in place (if the user is
+  // viewing "All statuses" or the post-transition status itself, so the
+  // row should remain visible with the new badge).
+  const applyTransition = useCallback(
+    (eventId: string, newStatus: 'committed' | 'voided') => {
+      setEvents((prev) => {
+        if (status && status !== newStatus) {
+          return prev.filter((e) => e.id !== eventId)
+        }
+        return prev.map((e) =>
+          e.id === eventId ? { ...e, status: newStatus } : e
+        )
+      })
+      setSelectedId(null)
+    },
+    [status]
+  )
 
-  const onRejected = useCallback((eventId: string) => {
-    setEvents((prev) => prev.filter((e) => e.id !== eventId))
-    setSelectedId(null)
-  }, [])
+  const onApproved = useCallback(
+    (eventId: string) => applyTransition(eventId, 'committed'),
+    [applyTransition]
+  )
+
+  const onRejected = useCallback(
+    (eventId: string) => applyTransition(eventId, 'voided'),
+    [applyTransition]
+  )
 
   return (
     <PageLayout>
@@ -446,6 +464,11 @@ const InboxContent: FC = function () {
           <div className="border-t border-gray-200 p-4 dark:border-gray-700">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Showing {filteredEvents.length} of {events.length} events
+              {truncated && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">
+                  (limit {EVENTS_LIMIT} reached — narrow filters to see more)
+                </span>
+              )}
             </p>
           </div>
         )}

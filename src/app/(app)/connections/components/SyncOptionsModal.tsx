@@ -136,7 +136,11 @@ export default function SyncOptionsModal({
           </div>
 
           {mode === 'full_rebuild' && (
-            <Alert color="warning" className="text-xs">
+            <Alert
+              theme={customTheme.alert}
+              color="warning"
+              className="text-xs"
+            >
               Pulls every transaction from the provider. Can take several
               minutes for large companies.
             </Alert>

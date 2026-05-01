@@ -2,6 +2,7 @@
 
 import { useUser } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import { Suspense } from 'react'
 import InboxContent from './content'
 
 export default function InboxPage() {
@@ -11,5 +12,11 @@ export default function InboxPage() {
     return <Spinner size="xl" fullScreen />
   }
 
-  return <InboxContent />
+  // InboxContent reads ?agentId= via useSearchParams — must be inside Suspense
+  // or Next will opt the entire route into client-side rendering.
+  return (
+    <Suspense fallback={<Spinner size="xl" fullScreen />}>
+      <InboxContent />
+    </Suspense>
+  )
 }

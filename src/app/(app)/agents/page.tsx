@@ -2,6 +2,7 @@
 
 import { useUser } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import { Suspense } from 'react'
 import AgentsContent from './content'
 
 export default function AgentsPage() {
@@ -11,5 +12,11 @@ export default function AgentsPage() {
     return <Spinner size="xl" fullScreen />
   }
 
-  return <AgentsContent />
+  // AgentsContent reads ?id= via useSearchParams — must be inside Suspense
+  // or Next will opt the entire route into client-side rendering.
+  return (
+    <Suspense fallback={<Spinner size="xl" fullScreen />}>
+      <AgentsContent />
+    </Suspense>
+  )
 }

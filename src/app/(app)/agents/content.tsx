@@ -9,6 +9,7 @@ import {
   useGraphContext,
 } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import { formatDate } from '@/lib/ledger/formatters'
 import type { LedgerAgent } from '@robosystems/client/clients'
 import {
   Alert,
@@ -24,7 +25,7 @@ import {
   TextInput,
 } from 'flowbite-react'
 import { useSearchParams } from 'next/navigation'
-import { type FC, useCallback, useEffect, useMemo, useState } from 'react'
+import { type FC, useEffect, useMemo, useState } from 'react'
 import { HiExclamationCircle, HiSearch, HiUserGroup } from 'react-icons/hi'
 import AgentDetailModal from './AgentDetailModal'
 
@@ -48,14 +49,7 @@ const TYPE_BADGE_COLOR: Record<string, string> = {
   employee: 'purple',
 }
 
-const formatDate = (iso: string | null | undefined): string => {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
+const AGENTS_LIMIT = 500
 
 const AgentsContent: FC = function () {
   const { state: graphState } = useGraphContext()
@@ -65,6 +59,7 @@ const AgentsContent: FC = function () {
   const [agents, setAgents] = useState<LedgerAgent[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [truncated, setTruncated] = useState(false)
 
   const [agentType, setAgentType] = useState('')
   const [source, setSource] = useState('')
@@ -79,34 +74,44 @@ const AgentsContent: FC = function () {
     [graphState.graphs, graphState.currentGraphId]
   )
 
-  const loadAgents = useCallback(async () => {
+  // Inlined into the effect so the cleanup `cancelled` flag is local to
+  // each invocation — prevents a stale response from overwriting state if
+  // currentGraph or filters change mid-flight.
+  useEffect(() => {
     if (!currentGraph) {
       setAgents([])
       setIsLoading(false)
+      setTruncated(false)
       return
     }
 
-    try {
-      setIsLoading(true)
-      setError(null)
-      const list = await clients.ledger.listAgents(currentGraph.graphId, {
-        agentType: agentType || undefined,
-        source: source || undefined,
-        limit: 500,
-      })
-      list.sort((a, b) => a.name.localeCompare(b.name))
-      setAgents(list)
-    } catch (err) {
-      console.error('Error loading agents:', err)
-      setError('Failed to load agents. Try again or check the connection.')
-    } finally {
-      setIsLoading(false)
+    let cancelled = false
+    void (async () => {
+      try {
+        setIsLoading(true)
+        setError(null)
+        const list = await clients.ledger.listAgents(currentGraph.graphId, {
+          agentType: agentType || undefined,
+          source: source || undefined,
+          limit: AGENTS_LIMIT,
+        })
+        if (cancelled) return
+        list.sort((a, b) => a.name.localeCompare(b.name))
+        setAgents(list)
+        setTruncated(list.length >= AGENTS_LIMIT)
+      } catch (err) {
+        if (cancelled) return
+        console.error('Error loading agents:', err)
+        setError('Failed to load agents. Try again or check the connection.')
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+
+    return () => {
+      cancelled = true
     }
   }, [currentGraph, agentType, source])
-
-  useEffect(() => {
-    void loadAgents()
-  }, [loadAgents])
 
   const filteredAgents = useMemo(() => {
     if (!searchTerm) return agents
@@ -290,6 +295,11 @@ const AgentsContent: FC = function () {
           <div className="border-t border-gray-200 p-4 dark:border-gray-700">
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Showing {filteredAgents.length} of {agents.length} agents
+              {truncated && (
+                <span className="ml-2 text-amber-600 dark:text-amber-400">
+                  (limit {AGENTS_LIMIT} reached — narrow filters to see more)
+                </span>
+              )}
             </p>
           </div>
         )}

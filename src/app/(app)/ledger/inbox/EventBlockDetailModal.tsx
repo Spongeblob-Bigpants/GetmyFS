@@ -2,6 +2,7 @@
 
 import { clients, customTheme } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import { formatDateTime } from '@/lib/ledger/formatters'
 import type {
   LedgerAgent,
   LedgerEventBlockDetail,
@@ -72,21 +73,17 @@ interface Props {
   onRejected: (eventId: string) => void
 }
 
-const formatCurrency = (cents: number, currency: string): string =>
-  new Intl.NumberFormat('en-US', {
+// Local alias kept so existing call sites read naturally; the shared
+// helper is null-safe and returns '—' for missing values.
+const formatCurrency = (
+  cents: number | null | undefined,
+  currency: string
+): string => {
+  if (cents === null || cents === undefined) return '—'
+  return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency || 'USD',
   }).format(cents / 100)
-
-const formatDateTime = (iso: string): string => {
-  const d = new Date(iso)
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
 }
 
 /**
@@ -315,7 +312,7 @@ const EventBlockDetailModal: FC<Props> = function ({
                 </span>
                 {agent ? (
                   <Link
-                    href={`/agents?id=${agent.id}`}
+                    href={`/agents?id=${encodeURIComponent(agent.id)}`}
                     className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline dark:text-blue-400"
                   >
                     {agent.name}

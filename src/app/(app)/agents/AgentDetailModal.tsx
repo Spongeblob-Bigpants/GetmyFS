@@ -2,6 +2,11 @@
 
 import { clients, customTheme } from '@/lib/core'
 import { Spinner } from '@/lib/core/ui-components'
+import {
+  formatAddress,
+  formatAmount,
+  formatDate,
+} from '@/lib/ledger/formatters'
 import type {
   LedgerAgentDetail,
   LedgerEventBlock,
@@ -22,7 +27,7 @@ import {
   TableRow,
 } from 'flowbite-react'
 import Link from 'next/link'
-import { type FC, useCallback, useEffect, useState } from 'react'
+import { type FC, useEffect, useState } from 'react'
 import { HiExclamationCircle } from 'react-icons/hi'
 
 interface Props {
@@ -37,66 +42,43 @@ const TYPE_BADGE_COLOR: Record<string, string> = {
   employee: 'purple',
 }
 
-const formatDate = (iso: string): string =>
-  new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-
-const formatAmount = (cents: number | null, currency: string): string => {
-  if (cents === null || cents === undefined) return '—'
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency || 'USD',
-  }).format(cents / 100)
-}
-
 const AgentDetailModal: FC<Props> = function ({ graphId, agentId, onClose }) {
   const [agent, setAgent] = useState<LedgerAgentDetail | null>(null)
   const [events, setEvents] = useState<LedgerEventBlock[]>([])
-  const [loadingAgent, setLoadingAgent] = useState(true)
-  const [loadingEvents, setLoadingEvents] = useState(true)
+  // Single flag — agent + events are fetched in one Promise.all and always
+  // resolve together, so two flags would never differ in practice.
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      setLoadingAgent(true)
-      setLoadingEvents(true)
-      setError(null)
-
-      const [agentDetail, eventList] = await Promise.all([
-        clients.ledger.getAgent(graphId, agentId),
-        clients.ledger.listEventBlocks(graphId, { agentId, limit: 20 }),
-      ])
-      setAgent(agentDetail)
-      eventList.sort(
-        (a, b) =>
-          new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
-      )
-      setEvents(eventList)
-    } catch (err) {
-      console.error('Error loading agent detail:', err)
-      setError('Failed to load agent.')
-    } finally {
-      setLoadingAgent(false)
-      setLoadingEvents(false)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const [agentDetail, eventList] = await Promise.all([
+          clients.ledger.getAgent(graphId, agentId),
+          clients.ledger.listEventBlocks(graphId, { agentId, limit: 20 }),
+        ])
+        if (cancelled) return
+        eventList.sort(
+          (a, b) =>
+            new Date(b.occurredAt).getTime() - new Date(a.occurredAt).getTime()
+        )
+        setAgent(agentDetail)
+        setEvents(eventList)
+      } catch (err) {
+        if (cancelled) return
+        console.error('Error loading agent detail:', err)
+        setError('Failed to load agent.')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
     }
   }, [graphId, agentId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const address = agent?.address as
-    | {
-        Line1?: string
-        City?: string
-        CountrySubDivisionCode?: string
-        PostalCode?: string
-      }
-    | null
-    | undefined
 
   return (
     <Modal show onClose={onClose} size="3xl" theme={customTheme.modal}>
@@ -122,7 +104,7 @@ const AgentDetailModal: FC<Props> = function ({ graphId, agentId, onClose }) {
       </ModalHeader>
 
       <ModalBody>
-        {loadingAgent ? (
+        {loading ? (
           <div className="flex justify-center py-12">
             <Spinner size="lg" />
           </div>
@@ -178,16 +160,7 @@ const AgentDetailModal: FC<Props> = function ({ graphId, agentId, onClose }) {
                   Address
                 </span>
                 <span className="text-gray-900 dark:text-white">
-                  {address && (address.Line1 || address.City)
-                    ? [
-                        address.Line1,
-                        address.City,
-                        address.CountrySubDivisionCode,
-                        address.PostalCode,
-                      ]
-                        .filter(Boolean)
-                        .join(', ')
-                    : '—'}
+                  {formatAddress(agent.address)}
                 </span>
               </div>
               <div>
@@ -220,11 +193,7 @@ const AgentDetailModal: FC<Props> = function ({ graphId, agentId, onClose }) {
               <h4 className="font-heading mb-2 text-sm font-bold text-gray-900 dark:text-white">
                 Recent events
               </h4>
-              {loadingEvents ? (
-                <div className="flex justify-center py-6">
-                  <Spinner size="sm" />
-                </div>
-              ) : events.length === 0 ? (
+              {events.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   No events linked to this agent yet.
                 </p>
@@ -282,7 +251,7 @@ const AgentDetailModal: FC<Props> = function ({ graphId, agentId, onClose }) {
       <ModalFooter>
         {agent && (
           <Link
-            href={`/ledger/inbox?agentId=${agent.id}`}
+            href={`/ledger/inbox?agentId=${encodeURIComponent(agent.id)}`}
             className="text-sm font-medium text-blue-600 hover:underline dark:text-blue-400"
           >
             View all events in inbox →

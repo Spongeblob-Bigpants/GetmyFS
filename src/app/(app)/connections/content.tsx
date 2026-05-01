@@ -34,8 +34,10 @@ import SyncOptionsModal, {
 } from './components/SyncOptionsModal'
 
 // How long to keep polling for a sync to complete before giving up.
+// 5 minutes covers full_rebuild on realistic QB realms; smaller incremental
+// syncs typically complete in well under a minute.
 const SYNC_POLL_INTERVAL_MS = 3000
-const SYNC_POLL_TIMEOUT_MS = 90_000
+const SYNC_POLL_TIMEOUT_MS = 300_000
 
 interface SyncWatch {
   // ms-since-epoch when we started watching this connection. We treat the
@@ -218,8 +220,10 @@ export default function ModernConnectionsContent() {
             continue
           }
           if (now - watch.startedAt > SYNC_POLL_TIMEOUT_MS) {
-            // Give up silently — the user can refresh manually if needed.
             next.delete(connectionId)
+            showError(
+              `${conn.provider} sync is taking longer than expected — refresh in a minute to see the latest status.`
+            )
           }
         }
         return next
@@ -227,11 +231,11 @@ export default function ModernConnectionsContent() {
     }, SYNC_POLL_INTERVAL_MS)
 
     return () => clearInterval(interval)
-  }, [syncWatches, loadConnections, showSuccess])
+  }, [syncWatches, loadConnections, showSuccess, showError])
 
   // ── Marketplace ──
 
-  const loadAvailableProviders = async () => {
+  const loadAvailableProviders = useCallback(async () => {
     if (!currentGraphId) return
     setProvidersLoading(true)
     try {
@@ -249,26 +253,26 @@ export default function ModernConnectionsContent() {
     } finally {
       setProvidersLoading(false)
     }
-  }
+  }, [currentGraphId, showError])
 
-  const openMarketplace = () => {
+  const openMarketplace = useCallback(() => {
     setSetupProvider(null)
     setMarketplaceOpen(true)
-    loadAvailableProviders()
-  }
+    void loadAvailableProviders()
+  }, [loadAvailableProviders])
 
-  const closeMarketplace = () => {
+  const closeMarketplace = useCallback(() => {
     setMarketplaceOpen(false)
     setSetupProvider(null)
-  }
+  }, [])
 
   // ── Provider setup callbacks ──
 
-  const handleSetupSuccess = () => {
+  const handleSetupSuccess = useCallback(() => {
     showSuccess('Connection created successfully')
     closeMarketplace()
-    loadConnections()
-  }
+    void loadConnections()
+  }, [showSuccess, closeMarketplace, loadConnections])
 
   // ── Sync ──
 
