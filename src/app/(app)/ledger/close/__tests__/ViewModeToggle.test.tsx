@@ -27,18 +27,20 @@ vi.mock('react-icons/hi', () => ({
   HiChevronDown: () => <span data-testid="chevron-down" />,
   HiClipboardList: () => <span data-testid="clipboard" />,
   HiEye: () => <span data-testid="eye" />,
+  HiShieldCheck: () => <span data-testid="shield" />,
   HiTable: () => <span data-testid="table" />,
 }))
 
 import ViewModeToggle from '../components/ViewModeToggle'
 
 describe('ViewModeToggle', () => {
-  it('renders all three mode options', () => {
+  it('renders all four mode options', () => {
     render(<ViewModeToggle viewMode="rendered" onChange={vi.fn()} />)
     // Trigger shows the current mode plus each option is in the menu.
     expect(screen.getAllByText('Rendered').length).toBeGreaterThan(0)
     expect(screen.getByText('Facts')).toBeInTheDocument()
     expect(screen.getByText('Elements')).toBeInTheDocument()
+    expect(screen.getByText('Validation')).toBeInTheDocument()
   })
 
   it('trigger label reflects current mode (rendered)', () => {
@@ -60,6 +62,24 @@ describe('ViewModeToggle', () => {
     expect(screen.getByTestId('dropdown-trigger').textContent).toContain(
       'Elements'
     )
+  })
+
+  it('trigger label reflects current mode (validation)', () => {
+    render(<ViewModeToggle viewMode="validation" onChange={vi.fn()} />)
+    expect(screen.getByTestId('dropdown-trigger').textContent).toContain(
+      'Validation'
+    )
+  })
+
+  it('calls onChange with "validation" when clicking the Validation item', () => {
+    const onChange = vi.fn()
+    render(<ViewModeToggle viewMode="rendered" onChange={onChange} />)
+    const validationItem = screen
+      .getAllByRole('menuitem')
+      .find((li) => li.textContent === 'Validation')
+    expect(validationItem).toBeDefined()
+    fireEvent.click(validationItem!.querySelector('button')!)
+    expect(onChange).toHaveBeenCalledWith('validation')
   })
 
   it('calls onChange with "facts" when clicking the Facts item', () => {

@@ -6,6 +6,7 @@ import FactTableProjection from './projections/FactTable'
 import ReportElementsProjection from './projections/ReportElements'
 import ScheduleRenderingProjection from './projections/ScheduleRendering'
 import StatementRenderingProjection from './projections/StatementRendering'
+import VerificationResultsProjection from './projections/VerificationResults'
 import type { EnvelopeBlock } from './types'
 import { isStatementBlockType } from './types'
 
@@ -55,6 +56,10 @@ const BlockView: FC<BlockViewProps> = ({
 
   if (viewMode === 'elements') {
     return <ReportElementsProjection envelope={envelope} />
+  }
+
+  if (viewMode === 'validation') {
+    return <VerificationResultsProjection envelope={envelope} />
   }
 
   // viewMode === 'rendered' — dispatch by block_type
