@@ -43,9 +43,82 @@ npm run format:check # Check code formatting
 
 **Route Structure:**
 
-- `(app)` route group: Authenticated pages (home, console, graphs, ledger, entities, entity, connections, plaid-connect, reports, settings)
+- `(app)` route group: Authenticated pages (see Route Inventory below)
 - `(landing)` route group: Public pages (login, register, legal pages, landing page)
 - API routes follow RESTful patterns with proper session validation
+
+**Route Inventory (consolidated from archived `roboledger-frontend.md` spec):**
+
+| Route                                     | Backend reads                                                       | Status                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `/home`                                   | listReports, listTransactions                                       | shipped                                                                  |
+| `/entity` `/entities`                     | getEntity, listEntities, opMaterialize                              | shipped (materialize card 2026-05-14)                                    |
+| `/connections`                            | listConnections, syncConnection                                     | shipped                                                                  |
+| `/connections/qb-callback`                | oauthCallback                                                       | shipped                                                                  |
+| `/connections/sec/setup`                  | createConnection                                                    | shipped                                                                  |
+| `/ledger/chart-of-accounts`               | getAccountTree, autoMapElements, mapping ops                        | shipped (auto-map UI live; CoA → US-GAAP mapping pending OLTP migration) |
+| `/ledger/transactions`                    | listTransactions, getTransaction, createJournalEntry (modal)        | shipped (NewJournalEntryModal 2026-05-14)                                |
+| `/ledger/trial-balance`                   | getTrialBalance, getMappedTrialBalance                              | shipped                                                                  |
+| `/ledger/close`                           | getPeriodCloseStatus, closePeriod, reopenPeriod, listPeriodDrafts   | shipped                                                                  |
+| `/ledger/schedules`                       | listInformationBlocks (filtered)                                    | shipped                                                                  |
+| `/ledger/inbox`                           | listEventBlocks, getEventBlock, previewEventBlock, updateEventBlock | shipped 2026-05-01                                                       |
+| `/agents`                                 | listAgents, getAgent                                                | shipped 2026-05-01                                                       |
+| `/reports` `/reports/new` `/reports/[id]` | listReports, createReport, getReportPackage                         | shipped                                                                  |
+| `/reports/publish-lists`                  | publishList CRUD                                                    | shipped                                                                  |
+| `/library`                                | listLibraryTaxonomies, getLibraryElement                            | shipped                                                                  |
+| `/console`                                | MCP-backed                                                          | shipped                                                                  |
+| `/search`                                 | placeholder                                                         | stub (depends on OpenSearch infra — `project_text_search` memory)        |
+| `/settings`                               | auth client                                                         | shipped                                                                  |
+| `/plaid-connect`                          | Plaid Link                                                          | shipped                                                                  |
+| `/graphs/new`                             | graph creation                                                      | shipped                                                                  |
+
+## Frontend Conventions
+
+**Optimistic mutations.** The Inbox `/ledger/inbox` uses optimistic remove via callbacks on approve/reject. The pattern generalizes to other write surfaces (manual JE creation, materialize, future backup/restore) — favor optimistic UI with rollback-on-failure over spinner-and-wait.
+
+**SDK helpers vs raw `gqlQuery`.** Inbox + Agents established the pattern: hand-written `.gql` files + `LedgerClient` methods mirroring `transactions.ts` / `listTransactions`. Continue this pattern for new SDK additions. **Never bump versions** in `package.json` / `pyproject.toml` — version bumps are owned by the user on publish.
+
+**Error mapping.** `friendlyError` helper handles closed-period and element-resolution 422s. Extend the helper as new error classes ship (materialize errors, backup conflicts, outbound-write rejects). Don't surface raw FastAPI 422 detail to users.
+
+**Refresh patterns.** Mutations that change list state use a `refreshKey` bump on the list component (e.g., transactions list after JE submit) rather than full-page reload. SSE operation streams (materialize, long-running ops) use `useOperationMonitoring` from the shared core library.
+
+**Form validation.** Multi-line balanced-entry forms (NewJournalEntryModal) tally running TOTAL DEBIT / TOTAL CREDIT / BALANCE and disable submit unless `BALANCE === 0`. Server-side errors (unbalanced lines, closed period, missing element) surface in a failure Alert without dismissing the form.
+
+**Code colocation.** Route features live under `src/app/(app)/<route>/` with a sibling `components/` (and `__tests__/`) directory — not under a top-level `src/components/<feature>/` tree. `src/components/` holds only cross-route primitives (`PageHeader`, `EntitySelector`, landing/error pages). When adding a new feature, colocate.
+
+**`page.tsx` vs `content.tsx`.** Each route splits into `page.tsx` (Next.js server-boundary entry) that delegates to a client `content.tsx`. Keep the split — don't inline client logic into `page.tsx`.
+
+**BlockView projections.** Statement / schedule / rules views render through `src/app/(app)/ledger/close/components/blockview/` with one file per projection under `projections/` (FactTable, StatementRendering, ScheduleRendering, BusinessRules, ReportElements, VerificationResults). New view modes land as a new projection file + a ViewModeToggle entry, not as a parallel component tree.
+
+**No SWR / React Query.** Data fetching is `useEffect` + `LedgerClient` SDK methods, with `refreshKey` bumps to invalidate. There's no global cache layer and we're not adopting one — don't reach for SWR/TanStack Query when adding a new fetch. If cross-component cache coordination starts hurting, raise it before refactoring.
+
+## Out of Scope (frontend; deferred indefinitely)
+
+The following are explicitly **not** planned for the frontend. Each has been considered and the decision is "no" until concrete customer signal demands otherwise:
+
+- **Real-time event push** (WebSockets / SSE for inbox refresh) — polling on tab focus is enough.
+- **Mobile-responsive layouts** beyond what flowbite-react gives for free. Desktop-first product; mobile-read-only is sufficient for initial customers.
+- **Bulk operations** beyond what's already shipped (batch approve in inbox is shipped; batch reassign, batch reclassify are not).
+- **Customizable inbox views per user** (saved filters, custom column layouts).
+- **Agent edit / manual agent creation** — read-only suffices until customer signal demands more.
+- **Draft-edit-then-approve workflow** for inbox events — today's flow is approve as-is or reject. The richer flow is part of `event-driven-ledger.md` §5.10 Event Approval Workflow UX (Package II.C1) and lands when that work activates.
+
+## Deferred Surfaces (small UX items; surface when needed)
+
+These are tracked here so they're not lost; each is small enough that it doesn't warrant a dedicated spec entry. Surface them when a customer asks or when the parent feature evolves:
+
+- **Backup / restore UI** — `POST /v1/graphs/{g}/operations/create-backup` and `restore-backup` exist; no UI. Settings page section showing backups list + create button + restore (with confirm). ~½ day each. Probably admin-only.
+- **Auto-map progress UI** — the CoA auto-map operation is async with SSE; the CoA page has the trigger button but no streaming progress display. ~2 hours. Land when the next pass over the CoA page happens.
+- **`/console` MCP improvements** — Console works but is sparse. Improvements layer in as the MCP tool catalog grows; not a fixed roadmap.
+- **QB connect-modal start-date picker** — three-option picker on first connect (full history / since-date / last 60 days). Backend support exists in `SyncOptionsModal` for post-OAuth resync; deferred because the OAuth callback path hardcodes `full_rebuild=True` and threading the picked option through OAuth state is a Phase 1.5 backend concern. See `quickbooks-adapter.md` §4.1.
+
+For larger forward-work surfaces tracked in proper specs:
+
+- **Analytics route** (`/analytics` or `/explore` — fact grid + financial-statement-analysis UI): see [`financial-viewer.md`](../../robosystems/local/docs/specs/financial-viewer.md) §7.15.
+- **Event approval workflow UX**: see [`event-driven-ledger.md`](../../robosystems/local/docs/specs/event-driven-ledger.md) §5.10.
+- **AI-suggested handler review page**: see [`event-driven-ledger.md`](../../robosystems/local/docs/specs/event-driven-ledger.md) §5.11.
+- **Verification Results panel restructure**: see [`financial-viewer.md`](../../robosystems/local/docs/specs/financial-viewer.md) §7.12.
+- **Drift reconciliation UX** (QB outbound write conflicts): see [`quickbooks-adapter.md`](../../robosystems/local/docs/specs/quickbooks-adapter.md) §4.3.
 
 **Ledger Sub-Routes:**
 
