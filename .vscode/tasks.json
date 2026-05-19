@@ -14,6 +14,12 @@
       "problemMatcher": []
     },
     {
+      "label": "cloudflared Tunnel",
+      "type": "shell",
+      "command": "npm run tunnel:cloudflared -- ${input:portRL}",
+      "problemMatcher": []
+    },
+    {
       "label": "Install Dependencies",
       "type": "shell",
       "command": "npm install",
