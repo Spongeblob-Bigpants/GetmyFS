@@ -24,7 +24,7 @@ import {
 } from 'flowbite-react'
 import Link from 'next/link'
 import type { FC } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { HiExclamationCircle, HiRefresh } from 'react-icons/hi'
 import { TbReportMoney } from 'react-icons/tb'
 
@@ -145,21 +145,28 @@ const LiveStatementsContent: FC = function () {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const range = useMemo(() => {
-    if (preset === 'custom') return { start: customStart, end: customEnd }
-    return presetRange(preset, new Date())
-  }, [preset, customStart, customEnd])
+  // Bumped per load; a stale in-flight response (seq !== current) is
+  // discarded, so rapidly cycling statement/period filters can't let an
+  // earlier request overwrite a later one.
+  const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
     if (!currentGraph) {
       setStatement(null)
       return
     }
+    // Resolve the window at call time so presets ("YTD", "This month")
+    // reflect the current date on a long-open tab and Refresh re-reads it.
+    const range =
+      preset === 'custom'
+        ? { start: customStart, end: customEnd }
+        : presetRange(preset, new Date())
     // Wait for both ends of a custom range before rendering.
     if (!range.start || !range.end) {
       setStatement(null)
       return
     }
+    const seq = ++loadSeq.current
     try {
       setIsLoading(true)
       setError(null)
@@ -171,15 +178,21 @@ const LiveStatementsContent: FC = function () {
           period_end: range.end,
         }
       )) as unknown as LiveStatement
+      if (seq !== loadSeq.current) return // superseded by a newer load
       setStatement(result && Array.isArray(result.periods) ? result : null)
     } catch (err) {
+      if (seq !== loadSeq.current) return
       console.error('Error loading live statement:', err)
-      setError('Failed to render the statement. Please try again.')
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to render the statement. Please try again.'
+      )
       setStatement(null)
     } finally {
-      setIsLoading(false)
+      if (seq === loadSeq.current) setIsLoading(false)
     }
-  }, [currentGraph, statementType, range.start, range.end])
+  }, [currentGraph, statementType, preset, customStart, customEnd])
 
   useEffect(() => {
     load()
