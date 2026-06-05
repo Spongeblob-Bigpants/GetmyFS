@@ -5,6 +5,7 @@ import {
   ElementDetail,
   GraphFilters,
   LibraryClient,
+  LibraryHierarchy,
   useGraphContext,
   type LibraryTaxonomy,
 } from '@/lib/core'
@@ -50,10 +51,18 @@ export default function LibraryContent() {
   const [selectedElementId, setSelectedElementId] = useState<string | null>(
     null
   )
+  const [viewMode, setViewMode] = useState<'browse' | 'hierarchy'>('browse')
+
+  // The hierarchy view resolves the arc-owning taxonomy from the selected
+  // taxonomy's standard ({base}-calculations / -presentation / -type-subtype).
+  const baseStandard = useMemo(
+    () => taxonomies.find((t) => t.id === selectedTaxonomyId)?.standard ?? null,
+    [taxonomies, selectedTaxonomyId]
+  )
 
   // Show reporting + CoA; exclude mapping and schedule taxonomies
   const sidebarTaxonomies = useMemo(() => {
-    const order: Record<string, number> = { sfac6: 0, fac: 1, 'rs-gaap': 2 }
+    const order: Record<string, number> = { 'rs-gaap': 0, sfac6: 1, fac: 2 }
     const hidden = new Set(['mapping', 'schedule'])
     return taxonomies
       .filter((t) => !hidden.has(t.taxonomyType ?? 'reporting'))
@@ -76,15 +85,11 @@ export default function LibraryContent() {
         setTaxonomies(rows)
         setTaxonomiesState('ready')
         if (rows.length > 0) {
-          const reporting = rows.filter(
-            (r) => (r.taxonomyType ?? 'reporting') === 'reporting'
-          )
-          const sfac6 = reporting.find((r) => r.standard === 'sfac6')
-          const fac = reporting.find((r) => r.standard === 'fac')
-          const rsGaap = reporting.find((r) => r.standard === 'rs-gaap')
-          setSelectedTaxonomyId(
-            sfac6?.id ?? fac?.id ?? rsGaap?.id ?? reporting[0]?.id ?? rows[0].id
-          )
+          // Default to rs-gaap — the active framework (fac has no tenant
+          // calc/presentation hierarchies); fall back to fac, then any row.
+          const rsGaap = rows.find((r) => r.standard === 'rs-gaap')
+          const fac = rows.find((r) => r.standard === 'fac')
+          setSelectedTaxonomyId(rsGaap?.id ?? fac?.id ?? rows[0].id)
         }
       })
       .catch((err: Error) => {
@@ -125,6 +130,26 @@ export default function LibraryContent() {
             </p>
           </div>
         </div>
+        <div
+          className="flex shrink-0 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700"
+          role="group"
+          aria-label="View mode"
+        >
+          {(['browse', 'hierarchy'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              aria-pressed={viewMode === mode}
+              className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
+                viewMode === mode
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </div>
 
       {taxonomiesState === 'loading' && (
@@ -139,23 +164,35 @@ export default function LibraryContent() {
         </Alert>
       )}
 
+      {/* Grid height = viewport minus ~220px of app header + page heading + padding above it. */}
       {taxonomiesState === 'ready' && (
         <div
           className="grid grid-cols-12 items-stretch gap-6"
           style={{ height: 'calc(100vh - 220px)', minHeight: '600px' }}
         >
-          <ElementBrowser
-            client={client}
-            graphId={graphId}
-            taxonomyId={selectedTaxonomyId}
-            taxonomies={sidebarTaxonomies}
-            onTaxonomyChange={(id) => {
-              setSelectedTaxonomyId(id)
-              setSelectedElementId(null)
-            }}
-            selectedElementId={selectedElementId}
-            onSelectElement={setSelectedElementId}
-          />
+          {viewMode === 'browse' ? (
+            <ElementBrowser
+              client={client}
+              graphId={graphId}
+              taxonomyId={selectedTaxonomyId}
+              taxonomies={sidebarTaxonomies}
+              onTaxonomyChange={(id) => {
+                setSelectedTaxonomyId(id)
+                setSelectedElementId(null)
+              }}
+              selectedElementId={selectedElementId}
+              onSelectElement={setSelectedElementId}
+            />
+          ) : (
+            <LibraryHierarchy
+              client={client}
+              graphId={graphId}
+              taxonomies={taxonomies}
+              baseStandard={baseStandard}
+              selectedElementId={selectedElementId}
+              onSelectElement={setSelectedElementId}
+            />
+          )}
           <ElementDetail
             client={client}
             graphId={graphId}
