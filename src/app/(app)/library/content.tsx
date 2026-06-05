@@ -5,6 +5,7 @@ import {
   ElementDetail,
   GraphFilters,
   LibraryClient,
+  LibraryHierarchy,
   useGraphContext,
   type LibraryTaxonomy,
 } from '@/lib/core'
@@ -49,6 +50,14 @@ export default function LibraryContent() {
   )
   const [selectedElementId, setSelectedElementId] = useState<string | null>(
     null
+  )
+  const [viewMode, setViewMode] = useState<'browse' | 'hierarchy'>('browse')
+
+  // The hierarchy view resolves the arc-owning taxonomy from the selected
+  // taxonomy's standard ({base}-calculations / -presentation / -type-subtype).
+  const baseStandard = useMemo(
+    () => taxonomies.find((t) => t.id === selectedTaxonomyId)?.standard ?? null,
+    [taxonomies, selectedTaxonomyId]
   )
 
   // Show reporting + CoA; exclude mapping and schedule taxonomies
@@ -125,6 +134,21 @@ export default function LibraryContent() {
             </p>
           </div>
         </div>
+        <div className="flex shrink-0 overflow-hidden rounded-lg border border-gray-200 dark:border-gray-700">
+          {(['browse', 'hierarchy'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={`px-4 py-2 text-sm font-medium capitalize transition-colors ${
+                viewMode === mode
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </div>
 
       {taxonomiesState === 'loading' && (
@@ -144,18 +168,29 @@ export default function LibraryContent() {
           className="grid grid-cols-12 items-stretch gap-6"
           style={{ height: 'calc(100vh - 220px)', minHeight: '600px' }}
         >
-          <ElementBrowser
-            client={client}
-            graphId={graphId}
-            taxonomyId={selectedTaxonomyId}
-            taxonomies={sidebarTaxonomies}
-            onTaxonomyChange={(id) => {
-              setSelectedTaxonomyId(id)
-              setSelectedElementId(null)
-            }}
-            selectedElementId={selectedElementId}
-            onSelectElement={setSelectedElementId}
-          />
+          {viewMode === 'browse' ? (
+            <ElementBrowser
+              client={client}
+              graphId={graphId}
+              taxonomyId={selectedTaxonomyId}
+              taxonomies={sidebarTaxonomies}
+              onTaxonomyChange={(id) => {
+                setSelectedTaxonomyId(id)
+                setSelectedElementId(null)
+              }}
+              selectedElementId={selectedElementId}
+              onSelectElement={setSelectedElementId}
+            />
+          ) : (
+            <LibraryHierarchy
+              client={client}
+              graphId={graphId}
+              taxonomies={taxonomies}
+              baseStandard={baseStandard}
+              selectedElementId={selectedElementId}
+              onSelectElement={setSelectedElementId}
+            />
+          )}
           <ElementDetail
             client={client}
             graphId={graphId}
